@@ -26,85 +26,92 @@ fn padded(message: &[u8]) -> Vec<u8> {
 }
 
 pub fn sha_2(message: &[u8]) -> Vec<u8> {
+
+    // Helper functions.
+    let ch = |x: u32, y: u32, z: u32| (x & y) ^ (!x & z);
+    let maj = |x: u32, y: u32, z: u32| (x & y) ^ (x & z) ^ (y & z);
+    let bsig0 = |x: u32| x.rotate_right(2) ^ x.rotate_right(13) ^ x.rotate_right(22);
+    let bsig1 = |x: u32| x.rotate_right(6) ^ x.rotate_right(11) ^ x.rotate_right(25);
+    let ssig0 = |x: u32| x.rotate_right(7) ^ x.rotate_right(18) ^ (x >> 3);
+    let ssig1 = |x: u32| x.rotate_right(17) ^ x.rotate_right(19) ^ (x >> 10);
+
+    // Inital hash value.
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+
+    // Pad the message to multiple of 512 bits.
     let message = padded(message);
 
-    let ch = |x:u32, y:u32, z:u32| (x & y) ^ (!x & z);
-    let maj = |x:u32, y:u32, z:u32| (x & y) ^ (x & z) ^ (y & z);
-    let bsig0 = |x:u32| x.rotate_right(2) ^ x.rotate_right(13) ^ x.rotate_right(22);
-    let bsig1 = |x:u32| x.rotate_right(6) ^ x.rotate_right(11) ^ x.rotate_right(25);
-    let ssig0 = |x:u32| x.rotate_right(7) ^ x.rotate_right(18) ^ (x >> 3);
-    let ssig1 = |x:u32| x.rotate_right(17) ^ x.rotate_right(19) ^ (x >> 10);
-
-    let mut h0: u32 = 0x6a09e667;
-    let mut h1: u32 = 0xbb67ae85;
-    let mut h2: u32 = 0x3c6ef372;
-    let mut h3: u32 = 0xa54ff53a;
-    let mut h4: u32 = 0x510e527f;
-    let mut h5: u32 = 0x9b05688c;
-    let mut h6: u32 = 0x1f83d9ab;
-    let mut h7: u32 = 0x5be0cd19;
-
+    // Split the message into 512-bit chunks.
     for chunk in message.chunks(64) {
-        // Schedule array
-        let mut w = vec![0u32; 64];
+
+        // Working space.
+        let mut message_schedule = vec![0u32; 64];
+
+        // Original message chunk takes 1/4 of the message schedule...
         for i in 0..16 {
-            w[i] = u32::from_be_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]]);
+            message_schedule[i] = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
         }
 
+        // ...the rest 3/4 are derived from it.
         for i in 16..64 {
-            w[i] = w[i - 16]
-                .wrapping_add(ssig0(w[i - 15]))
-                .wrapping_add(w[i - 7])
-                .wrapping_add(ssig1(w[i - 2]));
+            message_schedule[i] = message_schedule[i - 16]
+                .wrapping_add(ssig0(message_schedule[i - 15]))
+                .wrapping_add(message_schedule[i - 7])
+                .wrapping_add(ssig1(message_schedule[i - 2]));
         }
 
-        let mut a = h0;
-        let mut b = h1;
-        let mut c = h2;
-        let mut d = h3;
-        let mut e = h4;
-        let mut f = h5;
-        let mut g = h6;
-        let mut h = h7;
+        // Working wariables are there to be manipulated in order to update the hash value.
+        let mut working_wariables = h;
 
         let mut temp1: u32;
         let mut temp2: u32;
-        for i in 0..64 {
-            temp1 = h
-                .wrapping_add(bsig1(e))
-                .wrapping_add(ch(e,f,g))
-                .wrapping_add(K[i])
-                .wrapping_add(w[i]);
-            temp2 = bsig0(a).wrapping_add(maj(a,b,c));
 
-            h = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(temp1);
-            d = c;
-            c = b;
-            b = a;
-            a = temp1.wrapping_add(temp2);
+        // Compresion.
+        for i in 0..64 {
+            temp1 = working_wariables[7]
+                .wrapping_add(bsig1(working_wariables[4]))
+                .wrapping_add(ch(
+                    working_wariables[4],
+                    working_wariables[5],
+                    working_wariables[6],
+                ))
+                .wrapping_add(K[i])
+                .wrapping_add(message_schedule[i]);
+            temp2 = bsig0(working_wariables[0]).wrapping_add(maj(
+                working_wariables[0],
+                working_wariables[1],
+                working_wariables[2],
+            ));
+
+            working_wariables[7] = working_wariables[6];
+            working_wariables[6] = working_wariables[5];
+            working_wariables[5] = working_wariables[4];
+            working_wariables[4] = working_wariables[3].wrapping_add(temp1);
+            working_wariables[3] = working_wariables[2];
+            working_wariables[2] = working_wariables[1];
+            working_wariables[1] = working_wariables[0];
+            working_wariables[0] = temp1.wrapping_add(temp2);
         }
 
-        h0 = h0.wrapping_add(a);
-        h1 = h1.wrapping_add(b);
-        h2 = h2.wrapping_add(c);
-        h3 = h3.wrapping_add(d);
-        h4 = h4.wrapping_add(e);
-        h5 = h5.wrapping_add(f);
-        h6 = h6.wrapping_add(g);
-        h7 = h7.wrapping_add(h);
+        // Update hash value.
+        for i in 0..8 {
+            h[i] = h[i].wrapping_add(working_wariables[i]);
+        }
     }
 
-    let mut hash = h0.to_be_bytes().to_vec();
-    hash.append(&mut h1.to_be_bytes().to_vec());
-    hash.append(&mut h2.to_be_bytes().to_vec());
-    hash.append(&mut h3.to_be_bytes().to_vec());
-    hash.append(&mut h4.to_be_bytes().to_vec());
-    hash.append(&mut h5.to_be_bytes().to_vec());
-    hash.append(&mut h6.to_be_bytes().to_vec());
-    hash.append(&mut h7.to_be_bytes().to_vec());
+    let mut hash = Vec::new();
+
+    for piece in h {
+        hash.append(&mut piece.to_be_bytes().to_vec());
+    }
     hash
 }
 
@@ -117,7 +124,8 @@ pub fn u8_to_hex_string(input: &[u8]) -> String {
 }
 
 #[cfg(test)]
-use sha256::digest;
+use {rand::Rng, sha256::digest};
+
 #[test]
 fn test_padded_length() {
     let message = padded(&[0]);
@@ -129,7 +137,9 @@ fn test_padded_length() {
 fn test_padded_content() {
     let message = [0b01100001, 0b01100010, 0b01100011, 0b01100100, 0b01100101];
 
-    let expected = "61626364658000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028".to_string();
+    let expected = "61626364658000000000000000000000000000000000000000000\
+    000000000000000000000000000000000000000000000000000000000000000000000000028"
+        .to_string();
     let result = u8_to_hex_string(&padded(&message));
     assert_eq!(expected, result);
 }
@@ -157,4 +167,21 @@ fn test_sha_2_256_brown_fox() {
     let result = u8_to_hex_string(&sha_2(message.as_bytes()));
 
     assert_eq!(expected, result);
+}
+
+#[test]
+fn test_sha_2_256_random() {
+    let mut rng = rand::thread_rng();
+    for _ in 0..100 {
+        let message_len: u16 = rng.gen();
+        let mut message = String::with_capacity(message_len as usize);
+        for _ in 0..message_len {
+            message.push(rng.gen());
+        }
+        let expected = digest(message.as_str());
+
+        let result = u8_to_hex_string(&sha_2(message.as_bytes()));
+
+        assert_eq!(expected, result);
+    }
 }
